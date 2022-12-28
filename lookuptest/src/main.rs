@@ -33,12 +33,11 @@ impl<F: FieldExt> RangeCheckChip<F> {
         meta: &mut ConstraintSystem<F>,
         advice: Column<Advice>,
         instance: Column<Instance>,
+        range_table: TableColumn,
     ) -> RangeCheckConfig {
         meta.enable_equality(advice);
         meta.enable_equality(instance);
         let s_range_table = meta.complex_selector();
-
-        let range_table = meta.lookup_table_column();
 
         meta.lookup("range table", |meta| {
             let s = meta.query_selector(s_range_table);
@@ -50,8 +49,10 @@ impl<F: FieldExt> RangeCheckChip<F> {
     }
 
     fn load_range_check_table(&self, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        let config = self.config();
         layouter.assign_table(|| "range check table", |mut table| {
-            table.assign_cell(|| "a", self.config.range_table, 0, || Value::known(F::from(1)))?;
+            table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
+            table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(1)))?;
             Ok(())
         })
     }
@@ -96,7 +97,8 @@ impl<F: FieldExt> Circuit<F> for RangeCheckCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let advice = meta.advice_column();
         let instance = meta.instance_column();
-        RangeCheckChip::configure(meta, advice, instance)
+        let range_table = meta.lookup_table_column();
+        RangeCheckChip::configure(meta, advice, instance, range_table)
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
@@ -115,7 +117,7 @@ impl<F: FieldExt> Circuit<F> for RangeCheckCircuit<F> {
 fn main() {
     println!("Hello, world!");
 
-    let k = 3;
+    let k = 4;
 
     let a = Fp::from(1);
     let ins = Fp::from(9);
