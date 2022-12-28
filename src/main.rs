@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::circuit::{AssignedCell, Chip, Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::halo2curves::pasta::Fp;
-use halo2_proofs::plonk::{Advice, Circuit, Column, Constraints, ConstraintSystem, Error, Expression, Instance, Selector};
+use halo2_proofs::plonk::{Advice, Circuit, Column, Constraints, ConstraintSystem, Error, Expression, Instance, Selector, TableColumn};
 use halo2_proofs::poly::Rotation;
 
 const ELEMENT_LEN: usize = 3;
@@ -17,6 +17,9 @@ struct SortConfig {
     s_diff: Selector,
     s_one_eq: Selector,
     s_sum_eq: Selector,
+
+    test_table: [TableColumn; 3],
+    s_test_table: Selector,
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +59,9 @@ impl<F: FieldExt> SortChip<F> {
         let s_diff = meta.selector();
         let s_one_eq = meta.selector();
         let s_sum_eq = meta.selector();
+        let s_test_table = meta.complex_selector();
+
+        let test_table = [meta.lookup_table_column(), meta.lookup_table_column(), meta.lookup_table_column()];
 
         meta.create_gate("bool check for less than", |meta| {
             let selector = meta.query_selector(s_is_less_than);
@@ -105,7 +111,19 @@ impl<F: FieldExt> SortChip<F> {
             vec![sum_eq * (a + b + c - i_a - i_b - i_c)]
         });
 
-        SortConfig {advices, instances, s_is_less_than, s_diff, s_one_eq, s_sum_eq}
+        meta.lookup("test table", |meta| {
+            let s = meta.query_selector(s_test_table);
+            let one = meta.query_advice(advices[0], Rotation::cur());
+            let two = meta.query_advice(advices[1], Rotation::cur());
+            let three = meta.query_advice(advices[2], Rotation::cur());
+            vec![
+                (s.clone() * one, test_table[0]),
+                (s.clone() * two, test_table[1]),
+                (s * three, test_table[2]),
+            ]
+        });
+
+        SortConfig {advices, instances, s_is_less_than, s_diff, s_one_eq, s_sum_eq, test_table, s_test_table}
     }
 
     fn assign_all(&self, mut layouter: impl Layouter<F>, val: [Value<F>; ELEMENT_LEN]) -> Result<[Number<F>; ELEMENT_LEN], Error> {
@@ -188,6 +206,31 @@ impl<F: FieldExt> SortChip<F> {
                 Ok(())
             })
     }
+    fn load_test_table(&self, mut layouter: impl Layouter<F>) -> Result<(), Error> {
+        layouter.assign_table(|| "test table", |mut table| {
+            table.assign_cell(|| "one", self.config.test_table[0], 0, || Value::known(F::from(1)))?;
+            table.assign_cell(|| "two", self.config.test_table[1], 0, || Value::known(F::from(2)))?;
+            table.assign_cell(|| "three", self.config.test_table[2], 0, || Value::known(F::from(3)))?;
+
+            Ok(())
+        })
+    }
+
+    pub fn assign_test_table(
+        &self,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        let config = self.config();
+        layouter.assign_region(
+            || "assign eq diff",
+            |mut region| {
+                config.s_test_table.enable(&mut region, 0)?;
+                region.assign_advice(|| "lookup a", config.advices[0], 0, || Value::known(F::from(1)))?;
+                region.assign_advice(|| "lookup b", config.advices[1], 0, || Value::known(F::from(2)))?;
+                region.assign_advice(|| "lookup c", config.advices[2], 0, || Value::known(F::from(3)))?;
+                Ok(())
+            })
+    }
 
 }
 
@@ -242,6 +285,8 @@ impl<F: FieldExt> Circuit<F> for SortCircuit<F> {
             println!("element on idx({:?}) is {:?}", i, raw[i]);
         }
 
+        sort_chip.load_test_table(layouter.namespace(|| "load test table"))?;
+
         // load sorted values
         let new_arr = sort_chip.assign_all(layouter.namespace(|| "one"),
                                            [Value::known(raw[0]), Value::known(raw[1]), Value::known(raw[2])])?;
@@ -255,6 +300,8 @@ impl<F: FieldExt> Circuit<F> for SortCircuit<F> {
 
         // private input is equal to public input
         sort_chip.assign_instance_diff(layouter.namespace(|| "diff of a with instances"), new_arr[0].clone(), self.instances, self.max)?;
+
+        //sort_chip.assign_test_table(layouter.namespace(|| "assign_test_table"))?;
 
         Ok(())
     }
