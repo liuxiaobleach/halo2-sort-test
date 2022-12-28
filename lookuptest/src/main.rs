@@ -53,6 +53,10 @@ impl<F: FieldExt> RangeCheckChip<F> {
         layouter.assign_table(|| "range check table", |mut table| {
             table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
             table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(1)))?;
+            // why
+            //  table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
+            //  table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(1)))?;
+            // not work ?
             Ok(())
         })
     }
