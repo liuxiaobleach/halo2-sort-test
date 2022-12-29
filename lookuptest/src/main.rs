@@ -9,10 +9,10 @@ use halo2_proofs::poly::Rotation;
 
 #[derive(Clone, Debug)]
 struct RangeCheckConfig {
-    advice: Column<Advice>,
+    advice: [Column<Advice>; 2],
     instance: Column<Instance>,
 
-    range_table: TableColumn,
+    range_table: [TableColumn; 2],
     s_range_table: Selector,
 }
 
@@ -31,18 +31,20 @@ impl<F: FieldExt> RangeCheckChip<F> {
 
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        advice: Column<Advice>,
+        advice: [Column<Advice>; 2],
         instance: Column<Instance>,
-        range_table: TableColumn,
+        range_table: [TableColumn; 2],
     ) -> RangeCheckConfig {
-        meta.enable_equality(advice);
+        meta.enable_equality(advice[0]);
+        meta.enable_equality(advice[1]);
         meta.enable_equality(instance);
         let s_range_table = meta.complex_selector();
 
         meta.lookup("range table", |meta| {
             let s = meta.query_selector(s_range_table);
-            let a = meta.query_advice(advice, Rotation::cur());
-            vec![(s * a, range_table)]
+            let a = meta.query_advice(advice[0], Rotation::cur());
+            let b = meta.query_advice(advice[1], Rotation::cur());
+            vec![(s.clone() * a, range_table[0]), (s * b, range_table[1])]
         });
 
         RangeCheckConfig {advice, instance, range_table, s_range_table}
@@ -51,8 +53,15 @@ impl<F: FieldExt> RangeCheckChip<F> {
     fn load_range_check_table(&self, mut layouter: impl Layouter<F>) -> Result<(), Error> {
         let config = self.config();
         layouter.assign_table(|| "range check table", |mut table| {
-            table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
-            table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(1)))?;
+            table.assign_cell(|| "a0", config.range_table[0], 0, || Value::known(F::from(0)))?;
+            table.assign_cell(|| "a1", config.range_table[0], 1, || Value::known(F::from(1)))?;
+            table.assign_cell(|| "a2", config.range_table[0], 2, || Value::known(F::from(2)))?;
+            table.assign_cell(|| "a3", config.range_table[0], 3, || Value::known(F::from(3)))?;
+
+            table.assign_cell(|| "b0", config.range_table[1], 0, || Value::known(F::from(0)))?;
+            table.assign_cell(|| "b1", config.range_table[1], 1, || Value::known(F::from(5)))?;
+            table.assign_cell(|| "b2", config.range_table[1], 2, || Value::known(F::from(6)))?;
+            table.assign_cell(|| "b3", config.range_table[1], 3, || Value::known(F::from(7)))?;
             // why
             //  table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(1)))?;
             //  table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(0)))?;
@@ -61,12 +70,13 @@ impl<F: FieldExt> RangeCheckChip<F> {
         })
     }
 
-    fn assign_all(&self, mut layouter: impl Layouter<F>, val: Value<F>) -> Result<AssignedCell<F, F>, Error> {
+    fn assign_all(&self, mut layouter: impl Layouter<F>) -> Result<AssignedCell<F, F>, Error> {
         let config = self.config();
 
         layouter.assign_region(|| "load private", |mut region| {
             config.s_range_table.enable(&mut region, 0)?;
-            let a = region.assign_advice(|| "a", config.advice, 0, || val.clone()).unwrap();
+            let a = region.assign_advice(|| "a", config.advice[0], 0, || Value::known(F::from(2))).unwrap();
+            let b = region.assign_advice(|| "b", config.advice[1], 0, || Value::known(F::from(6))).unwrap();
             Ok(a)
         })
     }
@@ -99,9 +109,9 @@ impl<F: FieldExt> Circuit<F> for RangeCheckCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let advice = meta.advice_column();
+        let advice = [meta.advice_column(), meta.advice_column()];
         let instance = meta.instance_column();
-        let range_table = meta.lookup_table_column();
+        let range_table = [meta.lookup_table_column(), meta.lookup_table_column()];
         RangeCheckChip::configure(meta, advice, instance, range_table)
     }
 
@@ -110,7 +120,7 @@ impl<F: FieldExt> Circuit<F> for RangeCheckCircuit<F> {
 
         // load sorted values
         range_check_chip.load_range_check_table(layouter.namespace(|| "load table"))?;
-        let assigned_cell = range_check_chip.assign_all(layouter.namespace(|| "assign all"), Value::known(self.val))?;
+        let assigned_cell = range_check_chip.assign_all(layouter.namespace(|| "assign all"))?;
 
         println!("{:?}", assigned_cell);
 
@@ -123,7 +133,7 @@ fn main() {
 
     let k = 4;
 
-    let a = Fp::from(1);
+    let a = Fp::from(20);
     let ins = Fp::from(9);
 
     let circuit = RangeCheckCircuit {
