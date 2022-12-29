@@ -54,9 +54,9 @@ impl<F: FieldExt> RangeCheckChip<F> {
             table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
             table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(1)))?;
             // why
-            //  table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(1)))?;
-            //  table.assign_cell(|| "a", config.range_table, 1, || Value::known(F::from(0)))?;
-            // not work ?
+            //  must set 0 cell
+            //  for example: table.assign_cell(|| "a", config.range_table, 0, || Value::known(F::from(0)))?;
+            // ot it will not work ?
             Ok(())
         })
     }
